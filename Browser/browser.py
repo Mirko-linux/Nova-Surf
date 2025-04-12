@@ -260,8 +260,8 @@ class Browser(QMainWindow):
         self.tabs.setTabText(self.tabs.currentIndex(), "🛒 Store")
 
     def open_leonia_extension(self):
-        ext_path = os.path.abspath("extensions/leonia/popup.html")
-")
+        ext_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "extensions", "Servizi Leonia+", "popup.html")
+
         if os.path.exists(ext_path):
             url = QUrl.fromLocalFile(ext_path)
             self.tabs.currentWidget().setUrl(url)
@@ -314,11 +314,3 @@ if __name__ == '__main__':
     window = Browser()
     window.show()
     sys.exit(app.exec_())
-
-if __name__ == '__main__':
-    import sys
-    app = QApplication(sys.argv)
-    window = Browser()
-    window.show()
-    sys.exit(app.exec_())
-
