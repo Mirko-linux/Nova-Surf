@@ -49,7 +49,7 @@ class Browser(QMainWindow):
         estensioni_menu.addAction(servizi_action)
 
         gestore_action = QAction("🧩 Gestore Estensioni", self)
-        gestore_action.setEnabled(False)  # Disabilitato perché non ancora implementato
+        gestore_action.setEnabled(False)
         estensioni_menu.addAction(gestore_action)
 
 
@@ -96,10 +96,6 @@ class Browser(QMainWindow):
         self.settings_btn = QAction("⚙ Impostazioni", self)
         self.settings_btn.triggered.connect(self.open_settings)
         nav_bar.addAction(self.settings_btn)
-
-        self.extension_btn = QAction("🧩 Gestore Estensioni", self)
-        self.extension_btn.triggered.connect(self.open_leonia_extension)
-        nav_bar.addAction(self.extension_btn)
 
         new_tab_btn = QAction("➕ Nuova Scheda", self)
         new_tab_btn.triggered.connect(self.new_tab)
