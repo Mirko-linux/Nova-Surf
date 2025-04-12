@@ -131,7 +131,7 @@ class Browser(QMainWindow):
             self.setStyleSheet("") 
 
     def fetch_news(self):
-        api_key = 'fc89b08052684126a744651190bfdafa'
+        api_key = '********'
         url = f"https://newsapi.org/v2/everything?q=italia&sortBy=publishedAt&language=it&apiKey={api_key}"
 
         try:
