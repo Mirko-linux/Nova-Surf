@@ -49,7 +49,7 @@ class Browser(QMainWindow):
         estensioni_menu.addAction(servizi_action)
 
         gestore_action = QAction("🧩 Gestore Estensioni", self)
-        gestore_action.setEnabled(False)
+        gestore_action.setEnabled(False)  # Disabilitato perché non ancora implementato
         estensioni_menu.addAction(gestore_action)
 
 
@@ -97,6 +97,10 @@ class Browser(QMainWindow):
         self.settings_btn.triggered.connect(self.open_settings)
         nav_bar.addAction(self.settings_btn)
 
+        self.extension_btn = QAction("🧩 Gestore Estensioni", self)
+        self.extension_btn.triggered.connect(self.open_leonia_extension)
+        nav_bar.addAction(self.extension_btn)
+
         new_tab_btn = QAction("➕ Nuova Scheda", self)
         new_tab_btn.triggered.connect(self.new_tab)
         nav_bar.addAction(new_tab_btn)
@@ -131,7 +135,7 @@ class Browser(QMainWindow):
             self.setStyleSheet("") 
 
     def fetch_news(self):
-        api_key = '********'
+        api_key = 'fc89b08052684126a744651190bfdafa'
         url = f"https://newsapi.org/v2/everything?q=italia&sortBy=publishedAt&language=it&apiKey={api_key}"
 
         try:
@@ -256,7 +260,8 @@ class Browser(QMainWindow):
         self.tabs.setTabText(self.tabs.currentIndex(), "🛒 Store")
 
     def open_leonia_extension(self):
-        ext_path = os.path.abspath("/home/Mirko/Documenti/Servizi Leonia+/popup.html")
+        ext_path = os.path.abspath("extensions/leonia/popup.html")
+")
         if os.path.exists(ext_path):
             url = QUrl.fromLocalFile(ext_path)
             self.tabs.currentWidget().setUrl(url)
@@ -302,6 +307,13 @@ class SettingsWindow(QDialog):
         self.parent().apply_theme()
         self.accept()
 
+
+if __name__ == '__main__':
+    import sys
+    app = QApplication(sys.argv)
+    window = Browser()
+    window.show()
+    sys.exit(app.exec_())
 
 if __name__ == '__main__':
     import sys
