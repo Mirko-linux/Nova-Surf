@@ -1,0 +1,18 @@
+{
+  "manifest_version": 2,
+  "name": "Servizi Leonia+",
+  "description": "Accedi ai canali Telegram Leonia+ direttamente nel browser",
+  "version": "1.0",
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "permissions": [
+    "activeTab"
+  ]
+}
+

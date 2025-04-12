@@ -1,0 +1,32 @@
+name: nova-surf
+base: core22
+version: '1.0.5'
+summary: Browser semplice e leggero basato su PyQt5
+description: |
+  Nova Surf è un browser open-source sviluppato in Python con PyQt5.
+  Supporta schede, estensioni, notizie personalizzate e una barra degli strumenti moderna.
+
+grade: stable
+confinement: strict
+
+apps:
+  nova-surf:
+    command: bin/nova-surf
+    plugs:
+      - network
+      - network-bind
+      - home
+      - x11
+      - desktop
+      - desktop-legacy
+
+parts:
+  nova-surf:
+    plugin: python
+    source: .
+    python-requirements:
+      - requirements.txt
+
+    stage-packages:
+      - libxcb-xinerama0
+

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "Servizi Leonia+",
+  "description": "Una raccolta dei servizi di Leonia+ direttamente nel browser",
+  "version": "1.0",
+  "permissions": [
+    "activeTab"
+  ],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"  // L'icona che apparirà nella barra degli strumenti
+  },
+  "icons": {
+    "16": "icon.png",    // Icona per 16x16 pixel
+    "48": "icon.png",    // Icona per 48x48 pixel
+    "128": "icon.png"    // Icona per 128x128 pixel
+  }
+}
+
