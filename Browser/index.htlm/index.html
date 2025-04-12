@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nova Surf Store - Estensioni</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        header {
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+        main {
+            padding: 20px;
+        }
+        .extension {
+            background-color: white;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .extension h3 {
+            margin-top: 0;
+        }
+        .extension button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .extension button:hover {
+            background-color: #45a049;
+        }
+        footer {
+            text-align: center;
+            padding: 10px;
+            background-color: #333;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Benvenuto nel Nova Surf Store</h1>
+        <p>Esplora e installa le estensioni per il tuo browser Nova Surf!</p>
+    </header>
+
+    <main>
+        <!-- Estensione Servizi Leonia+ -->
+        <div class="extension">
+            <h3>Servizi Leonia+</h3>
+            <p>Accedi direttamente ai canali di Leonia+: Leonia+ Notizie, Leonia+ Extra, Leonia+ Sonnet e altri.</p>
+            <button onclick="window.location.href='nova-surf-extension://settings?extension=leonia'">Vai alle impostazioni di Servizi Leonia+</button>
+        </div>
+
+        <!-- Aggiungere qui altre estensioni -->
+        <div class="extension">
+            <h3>Estensione 2</h3>
+            <p>Una descrizione dell'estensione 2.</p>
+            <button onclick="window.location.href='nova-surf-extension://settings?extension=2'">Vai alle impostazioni dell'estensione 2</button>
+        </div>
+
+        <div class="extension">
+            <h3>Estensione 3</h3>
+            <p>Una descrizione dell'estensione 3.</p>
+            <button onclick="window.location.href='nova-surf-extension://settings?extension=3'">Vai alle impostazioni dell'estensione 3</button>
+        </div>
+
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Mirko Donato. Tutti i diritti riservati.</p>
+    </footer>
+
+</body>
+</html>
+def open_store(self):
+    store_html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Nova Surf Store</title>
+        <style>
+            /* Inserisci qui tutto il CSS dallo script HTML */
+        </style>
+    </head>
+    <body>
+        <h1>NOVA SURF STORE</h1>
+
+        <div class="app">
+            <div class="app-title">uBlock Origin</div>
+            <div class="app-desc">Ad-blocker avanzato per una navigazione pulita e veloce.</div>
+            <div class="license">Licenza: GPLv3</div>
+            <button onclick="installApp('uBlock Origin')">Installa</button>
+        </div>
+
+        <!-- Aggiungi gli altri blocchi .app -->
+
+        <script>
+            function installApp(appName) {
+                alert(`Installazione di "${appName}" in arrivo... (placeholder)`);
+            }
+        </script>
+    </body>
+    </html>
+    """
+    store_browser = QWebEngineView()
+    store_browser.setHtml(store_html)
+    self.tabs.addTab(store_browser, "Store")
+
