@@ -28,4 +28,15 @@ Assolutamente! Nova Surf è aperto a tutti. Vuoi contribuire?
 I servizi di **Leonia+** si suddividono in tre categorie:  
 - **Servizi Disponibili** → Accessibili interamente **sia su Telegram che sul browser**.  
 - **Servizi Semi-specializzanti** → Presenti su entrambe le piattaforme, ma con funzionalità aggiuntive su una delle due.  
-- **Servizi Specializzanti** → **Esclusivi di una piattaforma** (es. *Leonia+ Notizie* e *NovaHub*, disponibili solo su browser). 
+- **Servizi Specializzanti** → **Esclusivi di una piattaforma** (es. *Leonia+ Notizie* e *NovaHub*, disponibili solo su browser).
+
+### Cos'è il formato .nsk?
+Il formato .nsk (Nova Surf Package) è un'estensione proprietaria usata per eseguire gli add-on, simile aL .crx di Chrome. E' inoltre possibile importare anche altre estesioni al di fuori del browser, purché esse siano in formato .nsk 
+
+### Cos'è ArcadiaAI
+ArcadiaAI è il chatbot ufficiale di Nova Surf, basato sull’API LLaMA2. È progettato per offrire un’esperienza interattiva avanzata, con diverse funzionalità tra cui:
+- Ricerca su Internet: 
+
+### Cos'è Nova QuickNote?
+Nova QuickNote è un editor di testo libero e opensource disponibili sia insieme al browser sia come applicazione, utile per prendere appunti, scrivere ed eseguire codici comandi e per 
+lavorare è collegato anche ad internet, supporta ArcadiaAI e puoi attivare il salvataggio automatico o in cloud (Google Drive, Dropbox o Onedrive...) o in locale ed esportare in .odt, in .pdf e in .txt 
