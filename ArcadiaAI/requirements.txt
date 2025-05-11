@@ -2,3 +2,8 @@ flask
 requests
 python-dotenv
 gunicorn
+beautifulsoup4
+fuzzywuzzy
+python-Levenshtein
+google.generativeai 
+PyPDF2
