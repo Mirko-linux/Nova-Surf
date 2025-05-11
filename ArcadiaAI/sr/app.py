@@ -5,6 +5,9 @@ import re
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from fuzzywuzzy import fuzz
+import io
+import base64
+from PyPDF2 import PdfReader
 import google.generativeai as genai
 
 # Configurazione iniziale
@@ -20,21 +23,110 @@ if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
     try:
         gemini_model = genai.GenerativeModel('gemini-1.5-flash')
-        print("✅ Gemini 1.5 CES configurato con successo!")
-        
-        # Verifica i modelli disponibili
-        print("Modelli disponibili con la tua API Key:")
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                print(f"- {m.name}")
+        print("✅ Gemini 1.5 configurato con successo!")
     except Exception as e:
-        print(f"❌ Errore configurazione ArcadiaAI: {str(e)}")
+        print(f"❌ Errore configurazione Gemini: {str(e)}")
         gemini_model = None
 else:
     print("⚠️ GOOGLE_API_KEY non impostata. La funzionalità Gemini sarà disabilitata.")
     gemini_model = None
 
-# Route principale con pulsanti funzionanti
+# Funzione per pubblicare su Telegraph
+def publish_to_telegraph(title, content):
+    """Pubblica contenuti su Telegraph.
+    
+    Args:
+        title (str): Il titolo della pagina Telegraph.
+        content (str): Il contenuto della pagina.
+        
+    Returns:
+        str: L'URL della pagina Telegraph pubblicata, o un messaggio di errore.
+    """
+    url = "https://api.telegra.ph/createPage"
+    headers = {"Content-Type": "application/json"}
+    
+    # Converti il contenuto in formato Telegraph (array di paragrafi)
+    paragraphs = [p.strip() for p in content.split('\n') if p.strip()]
+    content_formatted = [{"tag": "p", "children": [p]} for p in paragraphs[:50]]  # Limita a 50 paragrafi
+    
+    payload = {
+        "access_token": TELEGRAPH_API_KEY,
+        "title": title[:256],  # Limita la lunghezza del titolo
+        "content": content_formatted,
+        "author_name": "ArcadiaAI"
+    }
+    
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=15)
+        res.raise_for_status()
+        result = res.json()
+        if result.get("ok"):
+            return result.get("result", {}).get("url", "⚠️ URL non disponibile")
+        return "⚠️ Pubblicazione fallita"
+    except requests.exceptions.RequestException as e:
+        print(f"Errore pubblicazione Telegraph (connessione): {str(e)}")
+        return f"⚠️ Errore di connessione a Telegraph: {str(e)}"
+    except Exception as e:
+        print(f"Errore pubblicazione Telegraph: {str(e)}")
+        return f"⚠️ Errore durante la pubblicazione: {str(e)}"
+
+# Funzione per generare contenuti con Gemini e pubblicare
+def generate_with_gemini(prompt, title):
+    """Genera contenuti con Gemini e pubblica su Telegraph."""
+    if not gemini_model:
+        return None, "❌ ArcadiaAI non è disponibile."
+    
+    try:
+        response = gemini_model.generate_content(
+            prompt,
+            generation_config={
+                "max_output_tokens": 3000,
+                "temperature": 0.7
+            }
+        )
+        
+        if not response.text:
+            return None, "❌ Impossibile generare il contenuto"
+        
+        telegraph_url = publish_to_telegraph(title, response.text)
+        return response.text, telegraph_url
+    
+    except Exception as e:
+        print(f"Errore generazione contenuto Gemini: {str(e)}")
+        return None, f"❌ Errore durante la generazione: {str(e)}"
+
+# Funzione per generare contenuti con Cohere e pubblicare
+def generate_with_cohere(prompt, title):
+    """Genera contenuti con Cohere e pubblica su Telegraph."""
+    if not COHERE_API_KEY:
+        return None, "❌ Cohere non è configurato"
+    
+    try:
+        res = requests.post(
+            "https://api.cohere.com/v1/generate",
+            headers={"Authorization": f"Bearer {COHERE_API_KEY}"},
+            json={
+                "model": "command",
+                "prompt": prompt,
+                "max_tokens": 2000,
+                "temperature": 0.7,
+                "timeout": 60
+            }
+        )
+        res.raise_for_status()
+        generated_text = res.json().get("generations", [{}])[0].get("text", "").strip()
+        
+        if not generated_text:
+            return None, "❌ Impossibile generare il contenuto"
+        
+        telegraph_url = publish_to_telegraph(title, generated_text)
+        return generated_text, telegraph_url
+    
+    except Exception as e:
+        print(f"Errore generazione contenuto Cohere: {str(e)}")
+        return None, f"❌ Errore durante la generazione: {str(e)}"
+    
+# Route principale
 @app.route('/')
 def home():
     return '''
@@ -52,8 +144,8 @@ def home():
             <div id="api-selection">
                 <label for="api-provider">Modello:</label>
                 <select id="api-provider">
-                    <option value="cohere">1.0 CES Lite</option>
-                    <option value="gemini" selected>1.5 CES</option>
+                    <option value="cohere">CES 1.0</option>
+                    <option value="gemini" selected>CES 1.5</option>
                 </select>
             </div>
             <button id="new-chat-btn">➕ Nuova Chat</button>
@@ -72,6 +164,65 @@ def home():
     </html>
     ''', 200, {'Content-Type': 'text/html; charset=utf-8'}
 
+@app.route("/chat", methods=["POST"])
+def chat():
+    """Endpoint principale per la chat."""
+    try:
+        if not request.is_json:
+            return jsonify({"reply": "❌ Formato non supportato. Usa application/json"})
+
+        data = request.get_json()
+        message = data.get("message", "").strip()
+        conversation_history = data.get("conversation_history", [])
+        api_provider = data.get("api_provider", "cohere")
+        attachments = data.get("attachments", [])
+
+        if not message and not attachments:
+            return jsonify({"reply": "❌ Nessun messaggio o allegato fornito!"})
+
+        # Gestione comando "saggio su" e pubblicazione
+        if "saggio su" in message.lower() and "pubblicalo su telegraph" in message.lower():
+            match = re.search(r"saggio su\s*(.+?)\s*e pubblicalo su telegraph", message.lower())
+            if match:
+                argomento = match.group(1).strip().capitalize()
+                title = f"Saggio su {argomento}"
+                
+                prompt = f"""Scrivi un saggio dettagliato in italiano su: {argomento}
+Struttura:
+1. Introduzione (contesto storico)
+2. Sviluppo (analisi approfondita)
+3. Conclusione (riflessioni finali)
+4. Bibliografia (fonti attendibili)
+
+Formattazione:
+- Paragrafi ben strutturati
+- Grassetto per i titoli delle sezioni"""
+                
+                if api_provider == "gemini" and gemini_model:
+                    print("Generazione saggio con Gemini...")
+                    _, telegraph_url = generate_with_gemini(prompt, title)
+                else:
+                    print("Generazione saggio con Cohere...")
+                    _, telegraph_url = generate_with_cohere(prompt, title)
+                
+                if telegraph_url and not telegraph_url.startswith("⚠️"):
+                    return jsonify({"reply": f"Ecco il tuo saggio su *{argomento}*: {telegraph_url}"})
+                else:
+                    return jsonify({"reply": telegraph_url or "❌ Errore nella pubblicazione"})
+
+        # Chat normale
+        if api_provider == "gemini" and gemini_model:
+            print("Chat con Gemini...")
+            reply = chat_with_gemini(message, conversation_history, attachments)
+        else:
+            print("Chat con Cohere...")
+            reply = chat_with_cohere(message, conversation_history)
+        
+        return jsonify({"reply": reply})
+
+    except Exception as e:
+        print(f"Errore durante la chat: {e}")
+        return jsonify({"reply": f"❌ Errore interno: {str(e)}"})   
 # Funzione per pubblicare su Telegraph
 def publish_to_telegraph(title, content):
     """Pubblica contenuti su Telegraph.
@@ -181,183 +332,30 @@ Requisiti:
     except Exception as e:
         print(f"Errore generazione contenuto: {str(e)}")
         return None, f"❌ Errore durante la generazione: {str(e)}"
+    
+
+
+def extract_text_from_pdf(pdf_data):
+    """Estrae testo da dati PDF binari."""
+    try:
+        pdf_reader = PdfReader(io.BytesIO(pdf_data))
+        text = ""
+        for page in pdf_reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        return text.strip()
+    except Exception as e:
+        print(f"Errore estrazione PDF: {str(e)}")
+        return None
+
 # Funzione ottimizzata per chattare con Gemini
-def chat_with_gemini(user_message, conversation_history):
-    """Chatta con Gemini, gestendo risposte predefinite e richieste di generazione contenuti.
-
-    Args:
-        user_message (str): Il messaggio dell'utente.
-        conversation_history (list): La cronologia della conversazione.
-
-    Returns:
-        str: La risposta del modello.
-    """
+def chat_with_gemini(user_message, conversation_history, attachments=None):
     if not gemini_model:
         return "❌ ArcadiaAI non è disponibile."
 
     try:
-        # Pulisci il messaggio per il confronto (rimuovi punteggiatura e spazi extra)
-        cleaned_msg = re.sub(r'[^\w\s]', '', user_message.lower()).strip()
-
-        # Dizionario completo di risposte predefinite con varianti
-        risposte_predefinite = {
-            "chi sei": [
-                "chi sei",
-                "chi sei tu",
-                "tu chi sei",
-                "presentati",
-                "come ti chiami",
-                "qual è il tuo nome"
-            ],
-            "cosa sai fare": [
-                "cosa sai fare",
-                "cosa puoi fare",
-                "funzionalità",
-                "capacità",
-                "a cosa servi",
-                "in cosa puoi aiutarmi"
-            ],
-            "chi è tobia testa": [
-                "chi è tobia testa",
-                "tobia testa",
-                "informazioni su tobia testa",
-                "parlami di tobia testa",
-                "chi è tobia teseo"
-            ],
-            "chi è mirko yuri donato": [
-                "chi è mirko yuri donato",
-                "mirko yuri donato",
-                "informazioni su mirko yuri donato",
-                "parlami di mirko yuri donato",
-                "chi ha creato arcadiaai"
-            ],
-            "chi è il presidente di arcadia": [
-                "chi è il presidente di arcadia",
-                "presidente di arcadia",
-                "chi guida arcadia",
-                "capo di arcadia"
-            ],
-            "chi è il presidente di lumenaria": [
-                "chi è il presidente di lumenaria",
-                "presidente di lumenaria",
-                "chi guida lumenaria",
-                "capo di lumenaria",
-                "carlo cesare orlando presidente"
-            ],
-            "cos'è nova surf": [
-                "cos'è nova surf",
-                "nova surf",
-                "che cos'è nova surf",
-                "parlami di nova surf",
-                "a cosa serve nova surf"
-            ],
-            "chi ti ha creato": [
-                "chi ti ha creato",
-                "chi ti ha fatto",
-                "da chi sei stato creato",
-                "creatore di arcadiaai"
-            ],
-            "chi è ciua grazisky": [
-                "chi è ciua grazisky",
-                "ciua grazisky",
-                "informazioni su ciua grazisky",
-                "parlami di ciua grazisky"
-            ],
-            "chi è carlo cesare orlando": [
-                "chi è carlo cesare orlando",
-                "carlo cesare orlando",
-                "informazioni su carlo cesare orlando",
-                "parlami di carlo cesare orlando",
-                "chi è davide leone"
-            ],
-            "chi è omar lanfredi": [
-                "chi è omar lanfredi",
-                "omar lanfredi",
-                "informazioni su omar lanfredi",
-                "parlami di omar lanfredi"
-            ],
-            "cos'è arcadiaai": [
-                "cos'è arcadiaai",
-                "arcadiaai",
-                "che cos'è arcadiaai",
-                "parlami di arcadiaai",
-                "a cosa serve arcadiaai"
-            ],
-            "sotto che licenza è distribuito arcadiaa": [
-                "sotto che licenza è distribuito arcadiaa",
-                "licenza arcadiaai",
-                "che licenza usa arcadiaai",
-                "arcadiaai licenza"
-            ],
-            "cosa sono le micronazioni": [
-                "cosa sono le micronazioni",
-                "micronazioni",
-                "che cosa sono le micronazioni",
-                "parlami delle micronazioni"
-            ],
-            "cos'è la repubblica di arcadia": [
-                "cos'è la repubblica di arcadia",
-                "repubblica di arcadia",
-                "che cos'è la repubblica di arcadia",
-                "parlami della repubblica di arcadia",
-                "arcadia micronazione"
-            ],
-            "cos'è la repubblica di lumenaria": [
-                "cos'è la repubblica di lumenaria",
-                "repubblica di lumenaria",
-                "che cos'è la repubblica di lumenaria",
-                "parlami della repubblica di lumenaria",
-                "lumenaria micronazione"
-            ],
-            "chi è salvatore giordano": [
-                "chi è salvatore giordano",
-                "salvatore giordano",
-                "informazioni su salvatore giordano",
-                "parlami di salvatore giordano"
-            ],
-            "da dove deriva il nome arcadia": [
-                "da dove deriva il nome arcadia",
-                "origine nome arcadia",
-                "significato nome arcadia",
-                "perché si chiama arcadia"
-            ],
-            "da dove deriva il nome lumenaria": [
-                "da dove deriva il nome lumenaria",
-                "origine nome lumenaria",
-                "significato nome lumenaria",
-                "perché si chiama lumenaria"
-            ],
-            "da dove deriva il nome leonia": [
-                "da dove deriva il nome leonia",
-                "origine nome leonia",
-                "significato nome leonia",
-                "perché si chiama leonia"
-            ],
-            "cosa si intende per open source": [
-                "cosa si intende per open source",
-                "open source significato",
-                "che significa open source",
-                "definizione di open source"
-            ],
-            "arcadiaai è un software libero": [
-                "arcadiaai è un software libero",
-                "arcadiaai software libero",
-                "arcadiaai è libero",
-                "software libero arcadiaai"
-            ],
-            "cos'è un chatbot": [
-                "cos'è un chatbot",
-                "chatbot significato",
-                "che significa chatbot",
-                "definizione di chatbot"
-            ],
-            "sotto che licenza sei distribuita": [
-                "sotto che licenza sei distribuita",
-                "licenza di arcadiaai",
-                "che licenza usi",
-                "arcadiaai licenza"
-            ]
-        }
+        full_message = user_message if user_message else ""
 
         # Mappa delle risposte predefinite
         risposte = {
@@ -386,84 +384,114 @@ def chat_with_gemini(user_message, conversation_history):
             "cos'è un chatbot": "Un chatbot è un programma informatico progettato per simulare una conversazione con gli utenti, spesso utilizzando tecnologie di intelligenza artificiale. I chatbot possono essere utilizzati per fornire assistenza, rispondere a domande o semplicemente intrattenere.",
             "sotto che licenza sei distribuita": "ArcadiaAI è distribuita sotto la licenza GNU GPL v3.0, che consente la modifica e la distribuzione del codice sorgente, garantendo la libertà di utilizzo e condivisione.",
         }
-        
-        # Controlla tutte le possibili varianti delle domande
-        for domanda_base, varianti in risposte_predefinite.items():
-            for variante in varianti:
-                variante_pulita = re.sub(r'[^\w\s]', '', variante.lower()).strip()
-                if (variante_pulita in cleaned_msg or 
-                    cleaned_msg in variante_pulita or 
-                    fuzz.ratio(cleaned_msg, variante_pulita) > 85):
-                    return risposte[domanda_base]
 
-        # Verifica se l'utente chiede di generare un saggio/storia/racconto
-        if any(phrase in cleaned_msg for phrase in ["saggio su", "storia su", "racconto su"]):
-            content_type = None
-            if "saggio su" in cleaned_msg:
-                content_type = "saggio"
-            elif "storia su" in cleaned_msg:
-                content_type = "storia"
-            elif "racconto su" in cleaned_msg:
-                content_type = "racconto"
+        # Trigger per le risposte predefinite
+        trigger_phrases = {
+            "chi sei": ["chi sei", "chi sei tu", "tu chi sei", "presentati", "come ti chiami", "qual è il tuo nome"],
+            "cosa sai fare": ["cosa sai fare", "cosa puoi fare", "funzionalità", "capacità", "a cosa servi", "in cosa puoi aiutarmi"],
+            "chi è tobia testa": ["chi è tobia testa", "informazioni su tobia testa", "parlami di tobia testa", "chi è tobia teseo"],
+            "chi è mirko yuri donato": ["chi è mirko yuri donato", "informazioni su mirko yuri donato", "parlami di mirko yuri donato", "chi ha creato arcadiaai"],
+            "chi è il presidente di arcadia": ["chi è il presidente di arcadia", "presidente di arcadia", "chi guida arcadia", "capo di arcadia"],
+            "chi è il presidente di lumenaria": ["chi è il presidente di lumenaria", "presidente di lumenaria", "chi guida lumenaria", "capo di lumenaria", "carlo cesare orlando presidente"],
+            "cos'è nova surf": ["cos'è nova surf", "che cos'è nova surf", "parlami di nova surf", "a cosa serve nova surf"],
+            "chi ti ha creato": ["chi ti ha creato", "chi ti ha fatto", "da chi sei stato creato", "creatore di arcadiaai"],
+            "chi è ciua grazisky": ["chi è ciua grazisky", "informazioni su ciua grazisky", "parlami di ciua grazisky"],
+            "chi è carlo cesare orlando": ["chi è carlo cesare orlando", "informazioni su carlo cesare orlando", "parlami di carlo cesare orlando", "chi è davide leone"],
+            "chi è omar lanfredi": ["chi è omar lanfredi", "informazioni su omar lanfredi", "parlami di omar lanfredi"],
+            "cos'è arcadiaai": ["cos'è arcadiaai", "che cos'è arcadiaai", "parlami di arcadiaai", "a cosa serve arcadiaai"],
+            "sotto che licenza è distribuito arcadiaa": ["sotto che licenza è distribuito arcadiaa", "licenza arcadiaai", "che licenza usa arcadiaai", "arcadiaai licenza"],
+            "cosa sono le micronazioni": ["cosa sono le micronazioni", "micronazioni", "che cosa sono le micronazioni", "parlami delle micronazioni"],
+            "cos'è la repubblica di arcadia": ["cos'è la repubblica di arcadia", "repubblica di arcadia", "che cos'è la repubblica di arcadia", "parlami della repubblica di arcadia", "arcadia micronazione"],
+            "cos'è la repubblica di lumenaria": ["cos'è la repubblica di lumenaria", "repubblica di lumenaria", "che cos'è la repubblica di lumenaria", "parlami della repubblica di lumenaria", "lumenaria micronazione"],
+            "chi è salvatore giordano": ["chi è salvatore giordano", "informazioni su salvatore giordano", "parlami di salvatore giordano"],
+            "da dove deriva il nome arcadia": ["da dove deriva il nome arcadia", "origine nome arcadia", "significato nome arcadia", "perché si chiama arcadia"],
+            "da dove deriva il nome lumenaria": ["da dove deriva il nome lumenaria", "origine nome lumenaria", "significato nome lumenaria", "perché si chiama lumenaria"],
+            "da dove deriva il nome leonia": ["da dove deriva il nome leonia", "origine nome leonia", "significato nome leonia", "perché si chiama leonia"],
+            "cosa si intende per open source": ["cosa si intende per open source", "open source significato", "che significa open source", "definizione di open source"],
+            "arcadiaai è un software libero": ["arcadiaai è un software libero", "arcadiaai software libero", "arcadiaai è libero", "software libero arcadiaai"],
+            "cos'è un chatbot": ["cos'è un chatbot", "chatbot significato", "che significa chatbot", "definizione di chatbot"],
+            "sotto che licenza sei distribuita": ["sotto che licenza sei distribuita", "licenza di arcadiaai", "che licenza usi", "arcadiaai licenza"]
+        }
+
+        # Estrazione testo da PDF (se ci sono allegati)
+        if attachments:
+            for attachment in attachments:
+                if attachment['type'] == 'application/pdf':
+                    try:
+                        if isinstance(attachment['data'], str) and attachment['data'].startswith('data:'):
+                            file_data = base64.b64decode(attachment['data'].split(',')[1])
+                        else:
+                            file_data = base64.b64decode(attachment['data'])
+                        
+                        extracted_text = extract_text_from_pdf(file_data)
+                        if extracted_text:
+                            full_message += f"\n[CONTENUTO PDF {attachment['name']}]:\n{extracted_text[:10000]}\n"
+                    except Exception as e:
+                        print(f"Errore elaborazione PDF: {str(e)}")
+                        full_message += f"\n[Errore nella lettura del PDF {attachment['name']}]"
+
+        # Controlla le risposte predefinite SOLO se non ci sono allegati
+        if not attachments or len(attachments) == 0:
+            cleaned_msg = re.sub(r'[^\w\s]', '', full_message.lower()).strip()
             
-            match = re.search(rf"{content_type} su\s*(.+)", cleaned_msg)
-            if match:
-                topic = match.group(1).strip()
-                generated_text, telegraph_url = generate_content_with_gemini(content_type, topic)
-                if generated_text and telegraph_url:
-                    return f"Ecco il tuo {content_type} su *{topic}*: {telegraph_url}"
-                elif telegraph_url:
-                    return telegraph_url
-                else:
-                    return "❌ Errore nella generazione del contenuto."
+            # Prima cerca corrispondenze esatte
+            for key, phrases in trigger_phrases.items():
+                if cleaned_msg in phrases:
+                    return risposte[key]
+            
+            # Poi cerca corrispondenze parziali con fuzzy matching
+            for key, phrases in trigger_phrases.items():
+                for phrase in phrases:
+                    if fuzz.ratio(cleaned_msg, phrase) > 85:  # Soglia di similarità dell'85%
+                        return risposte[key]
 
-        # Se non è una risposta predefinita o generazione contenuti, usa Gemini
-        history_formatted = []
+        # Prepara i contenuti per Gemini
+        contents = []
+        
+        # Aggiungi la cronologia della conversazione
         for msg in conversation_history[-6:]:
             if isinstance(msg, dict) and 'role' in msg and 'message' in msg:
                 role = msg['role'].lower()
                 if role == 'user':
-                    history_formatted.append({'role': 'user', 'parts': [msg['message']]})
+                    contents.append({'role': 'user', 'parts': [{'text': msg['message']}]})
                 elif role in ['assistant', 'model', 'bot']:
-                    history_formatted.append({'role': 'model', 'parts': [msg['message']]})
+                    contents.append({'role': 'model', 'parts': [{'text': msg['message']}]})
+        
+        # Prepara il nuovo messaggio con allegati
+        new_message_parts = [{'text': full_message}] if full_message else []
+        
+        if attachments:
+            for attachment in attachments:
+                mime_type = attachment.get('type', 'application/octet-stream')
+                file_data = attachment['data']
+                
+                if mime_type == 'application/pdf':
+                    continue
+                    
+                if file_data.startswith('data:'):
+                    file_data = file_data.split(',')[1]
+                
+                if mime_type.startswith('image/'):
+                    new_message_parts.append({
+                        'inline_data': {
+                            'mime_type': mime_type,
+                            'data': file_data
+                        }
+                    })
+                else:
+                    new_message_parts.append({
+                        'text': f"[Allegato: {attachment.get('name', 'file')}]"
+                    })
+        
+        contents.append({'role': 'user', 'parts': new_message_parts})
 
-        chat = gemini_model.start_chat(history=history_formatted)
-        response = chat.send_message(user_message)
+        # Invia la richiesta a Gemini
+        response = gemini_model.generate_content(contents)
         return response.text
 
     except Exception as e:
         print(f"Errore dettagliato Gemini 1.5 Flash: {str(e)}")
         return "❌ Si è verificato un errore con ArcadiaAI. Riprova più tardi."
-# API Chat
-@app.route("/chat", methods=["POST"])
-def chat():
-    """Endpoint per gestire le richieste di chat.
-
-    Fornisce risposte utilizzando Cohere o Gemini, in base alla configurazione.
-    """
-    data = request.get_json()
-    message = data.get("message", "").strip()
-    conversation_history = data.get("conversation_history", [])
-    api_provider = data.get("api_provider", "cohere")
-
-    if not message:
-        return jsonify({"reply": "❌ Messaggio vuoto, scrivi qualcosa!"})
-
-    try:
-        if api_provider == "gemini" and gemini_model:
-            print("Tentativo di chattare con Gemini 1.5 Flash...")
-            reply = chat_with_gemini(message, conversation_history)
-            print(f"Risposta da Gemini: '{reply[:100]}...'")
-            return jsonify({"reply": reply})
-        else:
-            print("Tentativo di chattare con Cohere...")
-            reply = chat_with_cohere(message, conversation_history)
-            print(f"Risposta da Cohere: '{reply[:100]}...'")
-            return jsonify({"reply": reply})
-    except Exception as e:
-        print(f"Errore durante la chat con {api_provider}: {e}")
-        return jsonify({"reply": f"❌ Errore interno con {api_provider}, riprova più tardi."})
-
 # Funzioni di supporto
 def search_duckduckgo(query):
     """Esegue una ricerca su DuckDuckGo e restituisce il primo URL trovato.
