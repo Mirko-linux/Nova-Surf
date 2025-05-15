@@ -90,7 +90,7 @@ class ArcadiaAI:
     def _carica_risposte_predefinite(self):
         """Carica le risposte predefinite per domande comuni"""
         return {
-            "chi sei": _("Sono ArcadiaAI, un chatbot open source basato su Gemini 1.5 Flash."),
+            "chi sei": _("Sono ArcadiaAI, un chatbot integrato in Nova QuickNote basato su Gemini 1.5 Flash."),
             "cosa sai fare": _("Posso aiutarti a scrivere, correggere, generare idee e molto altro usando l'AI di Google!"),
             "chi è tobia testa": _("Tobia Testa è un micronazionalista leonense noto per la sua attività nella Repubblica di Arcadia."),
             "chi è mirko yuri donato": _("Mirko Yuri Donato è il creatore di Nova QuickNote e altri progetti open source."),
@@ -168,6 +168,75 @@ class NovaQuickNote(Gtk.Window):
         
         # Imposta tema
         self._apply_theme(self.settings.get("theme"))
+    def export_dialog(self, button):
+        dialog = Gtk.FileChooserDialog(
+            title=_("Esporta Documento"),
+            parent=self,
+            action=Gtk.FileChooserAction.SAVE
+        )
+        dialog.add_buttons(
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+            Gtk.STOCK.SAVE, Gtk.ResponseType.OK
+        )
+        # Aggiungi selettore formato
+        format_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        format_label = Gtk.Label(label=_("Formato:"))
+        format_combo = Gtk.ComboBoxText()
+        for fmt in ["odt", "docx", "txt", "pdf"]:
+            format_combo.append_text(fmt)
+        format_combo.set_active(0)
+
+        format_box.pack_start(format_label, False, False, 0)
+        format_box.pack_start(format_combo, False, False, 0)
+        dialog.get_content_area().pack_start(format_box, False, False, 0)
+
+        dialog.show_all()
+        
+        if dialog.run() == Gtk.ResponseType.OK:
+            filename = dialog.get_filename()
+            selected_format = format_combo.get_active_text()
+            start, end = self.buffer.get_bounds()
+            content = self.buffer.get_text(start, end, True)
+
+            # Implementa la logica di esportazione per i diversi formati
+            if selected_format == "pdf":
+                self._export_to_pdf(filename, content)
+            elif selected_format == "docx":
+                self._export_to_docx(filename, content)
+            else:  # txt e odt
+                with open(f"{filename}.{selected_format}", "w") as f:
+                    f.write(content)
+
+        dialog.destroy()
+
+
+
+    def _export_to_pdf(self, filename, content):
+        """Esporta il contenuto in formato PDF"""
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import cm
+    
+        pdf_path = f"{filename}.pdf"
+        c = canvas.Canvas(pdf_path, pagesize=A4)
+        width, height = A4
+    
+        # Configurazione testo
+        c.setFont("Helvetica", 12)
+        x = 2 * cm
+        y = height - 2 * cm
+        line_height = 14
+    
+       # Scrittura del contenuto
+        for line in content.split("\n"): 
+            c.drawString(x, y, line)
+            y -= line_height
+            if y < 2 * cm:  # Nuova pagina
+                c.showPage()
+                y = height - 2 * cm
+    
+        c.save()
+        
 
     def _setup_ui(self):
         """Crea l'interfaccia utente"""
@@ -229,17 +298,19 @@ class NovaQuickNote(Gtk.Window):
         file_menu.set_submenu(file_submenu)
         app_menu.append(file_menu)
         
-        # Menu Modifica
-        edit_menu = Gtk.MenuItem.new_with_label(_("Modifica"))
-        edit_submenu = Gtk.Menu()
+        # Menu Editor
+        editor_menu = Gtk.MenuItem.new_with_label(_("Editor"))
+        editor_submenu = Gtk.Menu()
         
-        undo_item = Gtk.MenuItem.new_with_label(_("Annulla"))
-        redo_item = Gtk.MenuItem.new_with_label(_("Ripeti"))
+        run_item = Gtk.MenuItem.new_with_label(_("Esegui codice"))
+        comment_item = Gtk.MenuItem.new_with_label(_("Commenta/Decommenta"))
+        indent_item = Gtk.MenuItem.new_with_label(_("Indenta"))
         
-        edit_submenu.append(undo_item)
-        edit_submenu.append(redo_item)
-        edit_menu.set_submenu(edit_submenu)
-        app_menu.append(edit_menu)
+        editor_submenu.append(run_item)
+        editor_submenu.append(comment_item)
+        editor_submenu.append(indent_item)
+        editor_menu.set_submenu(editor_submenu)
+        app_menu.append(editor_menu)
         
         # Menu Visualizza
         view_menu = Gtk.MenuItem.new_with_label(_("Visualizza"))
@@ -263,6 +334,9 @@ class NovaQuickNote(Gtk.Window):
         open_item.connect("activate", self.open_file)
         save_item.connect("activate", self.save_file)
         export_item.connect("activate", self.export_dialog)
+        run_item.connect("activate", self.run_code)
+        comment_item.connect("activate", self.toggle_comment)
+        indent_item.connect("activate", self.indent_code)
         
         app_menu.show_all()
         
@@ -270,7 +344,15 @@ class NovaQuickNote(Gtk.Window):
         menu_btn = Gtk.MenuButton()
         menu_btn.set_popup(app_menu)
         menu_btn.set_image(Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON))
+        
+        # Pulsante Run accanto al menu
+        self.run_btn = Gtk.Button.new_from_icon_name("media-playback-start", Gtk.IconSize.BUTTON)
+        self.run_btn.set_tooltip_text(_("Esegui codice"))
+        self.run_btn.connect("clicked", self.run_code)
+        
+        # Aggiungi i pulsanti alla headerbar (prima il menu, poi run)
         self.headerbar.pack_end(menu_btn)
+        self.headerbar.pack_end(self.run_btn)
 
     def _create_sidebar(self):
         """Crea la sidebar"""
@@ -438,6 +520,16 @@ class NovaQuickNote(Gtk.Window):
             padding: 10px;
             margin: 5px;
         }
+        .code-block {
+            font-family: 'Monospace';
+            background-color: #f5f5f5;
+            border-left: 3px solid #ccc;
+            padding: 5px;
+        }
+        .error-message {
+            color: #cc0000;
+            background-color: #ffeeee;
+        }
         """
         css_provider.load_from_data(css.encode())
         Gtk.StyleContext.add_provider_for_screen(
@@ -483,6 +575,14 @@ class NovaQuickNote(Gtk.Window):
         self.buffer.create_tag("bullet", left_margin=20, indent=10)
         self.buffer.create_tag("numbered", left_margin=20, indent=10)
         self.buffer.create_tag("ai_assistant", background="lightgray", paragraph_background="lightgray")
+        self.buffer.create_tag("code-block", 
+                             font="Monospace",
+                             background="#f5f5f5",
+                             left_margin=10,
+                             indent=10)
+        self.buffer.create_tag("error-message",
+                             foreground="#cc0000",
+                             background="#ffeeee")
 
     def handle_new_line(self, widget, event):
         if event.keyval == Gdk.KEY_Return:
@@ -562,79 +662,159 @@ class NovaQuickNote(Gtk.Window):
             self.buffer.delete(start, end)
             self.buffer.insert(start, formatted_text)
 
-    def export_dialog(self, button):
-        dialog = Gtk.FileChooserDialog(title=_("Salva Documento"), parent=self, action=Gtk.FileChooserAction.SAVE)
-        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
-
-        format_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-        format_label = Gtk.Label(label=_("Formato:"))
-        format_combo = Gtk.ComboBoxText()
-        for fmt in ["odt", "doc", "docx", "txt", "pdf"]:
-            format_combo.append_text(fmt)
-
-        default_format_index = 2
-        if default_format_index < len(format_combo.get_model()):
-            format_combo.set_active(default_format_index)
-
-        format_box.pack_start(format_label, False, False, 0)
-        format_box.pack_start(format_combo, False, False, 0)
-        dialog.get_content_area().pack_start(format_box, False, False, 0)
-
-        dialog.show_all()
-
-        if dialog.run() == Gtk.ResponseType.OK:
-            filename = dialog.get_filename()
-            selected_format = format_combo.get_active_text()
+    def run_code(self, widget):
+        """Esegui il codice selezionato o tutto il testo"""
+        if self.buffer.get_has_selection():
+            start, end = self.buffer.get_selection_bounds()
+            code = self.buffer.get_text(start, end, True)
+        else:
             start, end = self.buffer.get_bounds()
-            content = self.buffer.get_text(start, end, True)
+            code = self.buffer.get_text(start, end, True)
+    
+    # Aggiungi un popup di caricamento
+        self.show_loading_dialog()
+    
+    # Esegui in un thread separato per non bloccare l'interfaccia
+        threading.Thread(
+            target=self._execute_code, 
+            args=(code,),
+            daemon=True
+        ).start()
 
-            if selected_format == "pdf":
-                pdf_path = f"{filename}.pdf"
-                c = canvas.Canvas(pdf_path, pagesize=A4)
-                width, height = A4
+    def show_loading_dialog(self):
+        """Mostra un dialog di caricamento durante l'esecuzione"""
+        self.loading_dialog = Gtk.Dialog(
+            title="Esecuzione in corso",
+            parent=self,
+            flags=0
+        )
+        self.loading_dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL)
+        self.loading_dialog.set_default_size(250, 100)
+    
+        content_area = self.loading_dialog.get_content_area()
+        spinner = Gtk.Spinner()
+        spinner.start()
+    
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(10)
+        box.set_margin_bottom(10)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+    
+        box.pack_start(spinner, True, True, 0)
+        box.pack_start(Gtk.Label(label="Elaborazione dello script in corso..."), True, True, 0)
+    
+        content_area.pack_start(box, True, True, 0)
+        self.loading_dialog.show_all()
+    
+    def hide_loading_dialog(self):
+        """Nasconde il dialog di caricamento"""
+        if hasattr(self, 'loading_dialog') and self.loading_dialog:
+            self.loading_dialog.destroy()
 
-                x = 2 * cm
-                y = height - 2 * cm
-                max_width = width - 4 * cm
-                line_height = 14
 
-                from reportlab.pdfbase.pdfmetrics import stringWidth
-
-                for line in content.split("\n"):
-                    words = line.split(" ")
-                    line_buffer = ""
-                    for word in words:
-                        test_line = line_buffer + word + " "
-                        if stringWidth(test_line, "Helvetica", 12) < max_width:
-                            line_buffer = test_line
-                        else:
-                            c.drawString(x, y, line_buffer.strip())
-                            y -= line_height
-                            line_buffer = word + " "
-                    if line_buffer:
-                        c.drawString(x, y, line_buffer.strip())
-                        y -= line_height
-
-                    if y < 2 * cm:
-                        c.showPage()
-                        y = height - 2 * cm
-
-                c.save()
-                print(f"✅ Esportato in PDF: {pdf_path}")
-
-            elif selected_format in ["docx", "doc"]:
-                doc = Document()
-                doc.add_paragraph(content)
-                doc.save(f"{filename}.{selected_format}")
-                print(f"✅ Esportato in {selected_format}: {filename}.{selected_format}")
-
-            else:
-                with open(f"{filename}.{selected_format}", "w") as f:
-                    f.write(content)
-                print(f"✅ Esportato in {selected_format}: {filename}.{selected_format}")
-
+    def _show_output(self, message):
+        """Mostra l'output in una finestra di dialogo"""
+        dialog = Gtk.MessageDialog(
+            parent=self,
+            flags=0,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text=message
+        )
+        dialog.run()
         dialog.destroy()
 
+    def toggle_comment(self, widget):
+        """Commenta/decommenta il codice selezionato"""
+        if self.buffer.get_has_selection():
+            start, end = self.buffer.get_selection_bounds()
+            text = self.buffer.get_text(start, end, True)
+            
+            # Determina se commentare o decommentare
+            if text.strip().startswith("#"):
+                # Decommenta
+                new_text = "\n".join(line[1:] if line.startswith("#") else line 
+                               for line in text.split("\n"))
+            else:
+                # Commenta
+                new_text = "\n".join(f"#{line}" for line in text.split("\n"))
+                
+            self.buffer.delete(start, end)
+            self.buffer.insert(start, new_text)
+
+    def indent_code(self, widget):
+        """Indenta il codice selezionato"""
+        if self.buffer.get_has_selection():
+            start, end = self.buffer.get_selection_bounds()
+            text = self.buffer.get_text(start, end, True)
+            indented = "\n".join(f"    {line}" for line in text.split("\n"))
+            self.buffer.delete(start, end)
+            self.buffer.insert(start, indented)
+
+    def _execute_code(self, code):
+        # Crea un namespace isolato per l'esecuzione
+        local_vars = {}
+        global_vars = {
+            '__builtins__': __builtins__,
+            'print': self._custom_print  # Sovrascrivi print per catturare l'output
+        }
+
+        self.execution_output = []
+       
+        try:
+            # Esegui il codice
+            exec(code, global_vars, local_vars)
+    
+            # Mostra eventuale output
+            output = "\n".join(self.execution_output)
+            if local_vars:
+                output += "\n\nVariabili create:\n" + "\n".join(
+                    f"{k}: {v}" for k, v in local_vars.items() 
+                    if not k.startswith('_')
+                )
+    
+            GLib.idle_add(self._show_execution_result, "Esecuzione completata", output)
+        except Exception as e:
+            error_msg = f"Errore durante l'esecuzione:\n{str(e)}"
+            GLib.idle_add(self._show_execution_result, "Errore", error_msg)
+        finally:
+           GLib.idle_add(self.hide_loading_dialog)
+            
+    def _custom_print(self, *args, **kwargs):
+        """Funzione personalizzata per catturare l'output di print"""
+        output = " ".join(str(arg) for arg in args)
+        self.execution_output.append(output)
+        # Puoi anche mantenere l'output originale sulla console se vuoi
+        __builtins__['print'](*args, **kwargs)
+     
+    def _show_execution_result(self, title, message):
+        """Mostra i risultati dell'esecuzione"""
+        dialog = Gtk.Dialog(
+            title=title,
+            parent=self,
+            flags=0
+        )
+        dialog.add_buttons(Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        dialog.set_default_size(600, 400)
+    
+        content_area = dialog.get_content_area()
+    
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    
+        textview = Gtk.TextView()
+        textview.set_editable(False)
+        textview.set_wrap_mode(Gtk.WrapMode.WORD)
+        textview.get_buffer().set_text(message)
+    
+        scroll.add(textview)
+        content_area.pack_start(scroll, True, True, 0)
+    
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
+     
     def save_file(self, button):
         dialog = Gtk.FileChooserDialog(title=_("Salva File"), parent=self, action=Gtk.FileChooserAction.SAVE)
         dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
@@ -665,78 +845,91 @@ class NovaQuickNote(Gtk.Window):
         self.arcadiaai_window = Gtk.Window(title=_("ArcadiaAI - Assistente"))
         self.arcadiaai_window.set_default_size(500, 400)
         self.arcadiaai_window.set_position(Gtk.WindowPosition.CENTER_ON_PARENT)
+        self.arcadiaai_window.set_transient_for(self)  # Rende la finestra modale
 
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-        vbox.set_margin_start(10)
-        vbox.set_margin_end(10)
-        vbox.set_margin_top(10)
-        vbox.set_margin_bottom(10)
+        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        main_box.set_margin_start(10)
+        main_box.set_margin_end(10)
+        main_box.set_margin_top(10)
+        main_box.set_margin_bottom(10)
+        self.arcadiaai_window.add(main_box)
 
-        # Frame per l'input
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        date_label = Gtk.Label(label=time.strftime("%a %d %b %H:%M"))
+        temp_label = Gtk.Label(label="19°C")
+        header_box.pack_start(date_label, False, False, 0)
+        header_box.pack_end(temp_label, False, False, 0)
+        main_box.pack_start(header_box, False, False, 0)
+
+        title_label = Gtk.Label(label="Nova QuickNote")
+        title_label.get_style_context().add_class("title")
+        main_box.pack_start(title_label, False, False, 0)
+
         input_frame = Gtk.Frame(label=_("Richiesta"))
-        input_frame.get_style_context().add_class("assistant-frame")
+        input_frame.set_shadow_type(Gtk.ShadowType.ETCHED_IN)
         input_scroll = Gtk.ScrolledWindow()
         input_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        input_scroll.set_min_content_height(100)
+        input_scroll.set_min_content_height(80)
         self.input_textview = Gtk.TextView()
         self.input_buffer = self.input_textview.get_buffer()
         input_scroll.add(self.input_textview)
         input_frame.add(input_scroll)
-        vbox.pack_start(input_frame, True, True, 0)
+        main_box.pack_start(input_frame, True, True, 0)
 
-        # Pulsanti di azione
-        buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-        
+        action_buttons = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL)
+        action_buttons.set_layout(Gtk.ButtonBoxStyle.CENTER)
+        action_buttons.set_spacing(5)
+
         send_btn = Gtk.Button.new_with_label(_("Invia"))
         send_btn.set_tooltip_text(_("Invia la richiesta ad ArcadiaAI"))
         send_btn.connect("clicked", self.send_to_arcadiaai)
-        
+
         insert_btn = Gtk.Button.new_with_label(_("Inserisci Testo"))
         insert_btn.set_tooltip_text(_("Inserisci il testo selezionato dal documento principale"))
         insert_btn.connect("clicked", self.insert_selected_text)
-        
-        buttons_box.pack_start(send_btn, True, True, 0)
-        buttons_box.pack_start(insert_btn, True, True, 0)
-        vbox.pack_start(buttons_box, False, False, 0)
 
-        # Frame per l'output
+        action_buttons.add(send_btn)
+        action_buttons.add(insert_btn)
+        main_box.pack_start(action_buttons, False, False, 0)
+
         output_frame = Gtk.Frame(label=_("Risposta"))
-        output_frame.get_style_context().add_class("assistant-frame")
+        output_frame.set_shadow_type(Gtk.ShadowType.ETCHED_IN)
         output_scroll = Gtk.ScrolledWindow()
         output_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        output_scroll.set_min_content_height(200)
+        output_scroll.set_min_content_height(150)
         self.output_textview = Gtk.TextView()
         self.output_buffer = self.output_textview.get_buffer()
         self.output_textview.set_editable(False)
         self.output_textview.set_wrap_mode(Gtk.WrapMode.WORD)
         output_scroll.add(self.output_textview)
         output_frame.add(output_scroll)
-        vbox.pack_start(output_frame, True, True, 0)
+        main_box.pack_start(output_frame, True, True, 0)
 
-        # Pulsanti di applicazione
-        apply_buttons_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-        
+        apply_buttons = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL)
+        apply_buttons.set_layout(Gtk.ButtonBoxStyle.CENTER)
+        apply_buttons.set_spacing(5)
+
         apply_btn = Gtk.Button.new_with_label(_("Applica al Documento"))
         apply_btn.set_tooltip_text(_("Aggiungi la risposta al documento principale"))
         apply_btn.connect("clicked", self.apply_arcadiaai_output)
-        
+
         copy_btn = Gtk.Button.new_with_label(_("Copia Risposta"))
         copy_btn.set_tooltip_text(_("Copia la risposta negli appunti"))
         copy_btn.connect("clicked", self.copy_arcadiaai_output)
-        
-        apply_buttons_box.pack_start(apply_btn, True, True, 0)
-        apply_buttons_box.pack_start(copy_btn, True, True, 0)
-        vbox.pack_start(apply_buttons_box, False, False, 0)
 
-        # Barra di stato
+        apply_buttons.add(apply_btn)
+        apply_buttons.add(copy_btn)
+        main_box.pack_start(apply_buttons, False, False, 0)
+
+        status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
         self.arcadiaai_status_label = Gtk.Label()
         self.arcadiaai_status_label.set_halign(Gtk.Align.START)
         self.update_arcadiaai_status()
-        vbox.pack_start(self.arcadiaai_status_label, False, False, 0)
+        status_box.pack_start(self.arcadiaai_status_label, True, True, 0)
+    
+        main_box.pack_start(status_box, False, False, 0)
 
-        self.arcadiaai_window.add(vbox)
         self.arcadiaai_window.show_all()
-
     def insert_selected_text(self, button):
         """Inserisce il testo selezionato nel documento principale nella casella di input"""
         if self.buffer.get_has_selection():
@@ -812,23 +1005,19 @@ class NovaQuickNote(Gtk.Window):
             self.output_buffer.get_end_iter(), 
             True
         )
-        
+    
         if output_text.strip():
-                       # Applica uno stile speciale al testo inserito
-            start_iter = self.buffer.get_end_iter()
-            self.buffer.insert(start_iter, "\n\n" + output_text)
-            
-            # Applica il tag per evidenziare il testo generato dall'AI
-            end_iter = self.buffer.get_end_iter()
-            start_mark = self.buffer.create_mark(None, start_iter, True)
-            self.buffer.apply_tag_by_name(
-                "ai_assistant", 
-                self.buffer.get_iter_at_mark(start_mark), 
-                end_iter
-            )
-            
-            self.modified = True
-            
+           cursor = self.buffer.get_insert() 
+           insert_iter = self.buffer.get_iter_at_mark(cursor)
+        
+           self.buffer.insert(insert_iter, "\n" + output_text + "\n")
+        
+           start_iter = self.buffer.get_iter_at_mark(cursor)
+           end_iter = self.buffer.get_end_iter()
+           self.buffer.apply_tag_by_name("ai_assistant", start_iter, end_iter)
+        
+           self.modified = True
+    
         self.arcadiaai_window.destroy()
 
 if __name__ == '__main__':
