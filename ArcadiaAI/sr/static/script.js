@@ -207,7 +207,7 @@ async function sendMessage() {
   state.isWaitingForResponse = true;
   renderInputState();
 
-  try {
+try {
     const response = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -217,7 +217,8 @@ async function sendMessage() {
           role: m.sender === 'user' ? 'user' : 'model',
           message: m.text
         })),
-        api_provider: selectedApi
+        api_provider: selectedApi,
+        experimental_mode: document.getElementById("experimental-mode-toggle")?.checked || false // <--- AGGIUNTO QUI
       })
     });
 
